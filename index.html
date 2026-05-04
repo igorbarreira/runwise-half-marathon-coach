@@ -331,6 +331,40 @@
     .zone-row .hide-mobile { display: none; }
     .step { grid-template-columns: 70px 1fr auto; }
   }
+
+  /* ===== Tabs ===== */
+  body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .tab { display: none; }
+  .tab.active { display: block; animation: fadein .18s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .tab > section, .tab > .hero, .tab > .collapsible { margin-bottom: 26px; }
+  .tab > :last-child { margin-bottom: 0; }
+
+  .tabbar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    background: rgba(255,255,255,.92);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-top: 1px solid var(--line);
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  }
+  .tabbar-item {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; padding: 6px 4px; border-radius: 12px;
+    background: none; border: 0; cursor: pointer;
+    color: var(--muted); font: inherit;
+    transition: color .12s, background .12s;
+  }
+  .tabbar-item:hover { background: var(--bg-soft); }
+  .tabbar-item.active { color: var(--accent); }
+  .tabbar-item .ico { font-size: 22px; line-height: 1; }
+  .tabbar-item .lbl { font-size: 10px; letter-spacing: .04em; font-weight: 600; }
+
+  /* In Método tab, open collapsibles by default look */
+  .tab[data-tab="metodo"] .collapsible { background: var(--card); }
+
+  footer { margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -339,6 +373,9 @@
   <div class="lhs"><span class="dot"></span> RunWise · Igor</div>
   <div class="live" id="live-badge">Carregando dados…</div>
 </div>
+
+<!-- ============ TAB: HOJE ============ -->
+<div class="tab" data-tab="hoje">
 
 <!-- HERO -->
 <div class="hero">
@@ -405,6 +442,11 @@
   </div>
 </section>
 
+</div><!-- /tab hoje -->
+
+<!-- ============ TAB: PROGRESSO ============ -->
+<div class="tab" data-tab="progresso">
+
 <!-- RECAP DA ÚLTIMA CORRIDA -->
 <section>
   <div class="section-head">
@@ -456,6 +498,11 @@
   </div>
 </section>
 
+</div><!-- /tab progresso -->
+
+<!-- ============ TAB: PLANO ============ -->
+<div class="tab" data-tab="plano">
+
 <!-- PLAN -->
 <section>
   <div class="section-head">
@@ -465,8 +512,13 @@
   <div class="plan" id="plan"></div>
 </section>
 
+</div><!-- /tab plano -->
+
+<!-- ============ TAB: MÉTODO ============ -->
+<div class="tab" data-tab="metodo">
+
 <!-- ZONES -->
-<details class="collapsible">
+<details class="collapsible" open>
   <summary>
     Zonas de ritmo & FC
     <span class="meta">LTHR 177 · alvo 4:21/km</span>
@@ -488,7 +540,7 @@
 </details>
 
 <!-- METHOD -->
-<details class="collapsible">
+<details class="collapsible" open>
   <summary>
     Método aplicado
     <span class="meta">Por que este plano</span>
@@ -500,6 +552,24 @@
     <p style="margin-bottom:0"><b>Não faz parte:</b> long &gt; 20km, progressivos longos, ladders agressivos. Você fez maratona há ~6 semanas — base já está. Adicionar agora = fadiga sem retorno.</p>
   </div>
 </details>
+
+</div><!-- /tab metodo -->
+
+<!-- ============ TAB BAR ============ -->
+<nav class="tabbar" role="tablist" aria-label="Navegação principal">
+  <button class="tabbar-item" data-target="hoje" aria-label="Hoje">
+    <span class="ico" aria-hidden="true">🏃</span><span class="lbl">Hoje</span>
+  </button>
+  <button class="tabbar-item" data-target="plano" aria-label="Plano">
+    <span class="ico" aria-hidden="true">📅</span><span class="lbl">Plano</span>
+  </button>
+  <button class="tabbar-item" data-target="progresso" aria-label="Progresso">
+    <span class="ico" aria-hidden="true">📈</span><span class="lbl">Progresso</span>
+  </button>
+  <button class="tabbar-item" data-target="metodo" aria-label="Método">
+    <span class="ico" aria-hidden="true">📖</span><span class="lbl">Método</span>
+  </button>
+</nav>
 
 <!-- MODAL -->
 <div class="modal-bg" id="modal">
@@ -514,6 +584,35 @@
 </footer>
 
 <script>
+// ============================================================
+// TABS
+// ============================================================
+(function initTabs() {
+  const TABS = ['hoje', 'plano', 'progresso', 'metodo'];
+  const KEY = 'runwise.tab';
+  const stored = localStorage.getItem(KEY);
+  const initial = TABS.includes(stored) ? stored : 'hoje';
+
+  function activate(name) {
+    if (!TABS.includes(name)) name = 'hoje';
+    document.querySelectorAll('.tab').forEach(el => {
+      el.classList.toggle('active', el.dataset.tab === name);
+    });
+    document.querySelectorAll('.tabbar-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.target === name);
+    });
+    try { localStorage.setItem(KEY, name); } catch (e) {}
+    window.scrollTo(0, 0);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.tabbar-item').forEach(btn => {
+      btn.addEventListener('click', () => activate(btn.dataset.target));
+    });
+    activate(initial);
+  });
+})();
+
 // ============================================================
 // CONFIG
 // ============================================================
