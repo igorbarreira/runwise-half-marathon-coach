@@ -1,0 +1,13 @@
+name = "runwise-api"
+main = "src/index.js"
+compatibility_date = "2025-04-01"
+
+# KV namespace — create with:  wrangler kv namespace create RUNWISE
+# then paste the id below.
+[[kv_namespaces]]
+binding = "RUNWISE"
+id = "9e57268628f44edb9cd7ca278a4f6c75"
+
+# Secrets (do NOT commit values). Set with:
+#   wrangler secret put OURA_TOKEN
+#   wrangler secret put SYNC_TOKEN

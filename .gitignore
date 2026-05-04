@@ -1,0 +1,27 @@
+# Node / Wrangler
+node_modules/
+.wrangler/
+worker/.wrangler/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Garmin token cache — never commit
+.garminconnect/
+**/.garminconnect/
+
+# OS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+!.vscode/launch.json
+
+# Local env files
+.env
+.env.local
+*.env

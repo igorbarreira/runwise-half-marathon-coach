@@ -1,0 +1,37 @@
+name: RunWise sync
+
+on:
+  schedule:
+    # Every 2 hours, all day. UTC. (BRT = UTC-3)
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: runwise-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: sync/requirements.txt
+
+      - name: Install deps
+        run: pip install -r sync/requirements.txt
+
+      - name: Run sync
+        env:
+          RUNWISE_API: ${{ secrets.RUNWISE_API }}
+          RUNWISE_SYNC_TOKEN: ${{ secrets.RUNWISE_SYNC_TOKEN }}
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          OURA_TOKEN: ${{ secrets.OURA_TOKEN }}
+          GARMIN_TOKENS_B64: ${{ secrets.GARMIN_TOKENS_B64 }}
+        run: python sync/sync_runwise.py

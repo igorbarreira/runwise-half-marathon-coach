@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template — runs sync_runwise.py every hour while the Mac is awake.
+
+  Install:
+    1. Edit the env block below with your real values (Garmin/Oura/RunWise).
+    2. Copy to ~/Library/LaunchAgents/com.runwise.sync.plist
+    3. launchctl load -w ~/Library/LaunchAgents/com.runwise.sync.plist
+
+  Uninstall:
+    launchctl unload -w ~/Library/LaunchAgents/com.runwise.sync.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.runwise.sync</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>/Users/igormagro/Documents/Claude/Artifacts/runwise-half-marathon-coach/sync/sync_runwise.py</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RUNWISE_API</key>
+    <string>https://runwise-api.YOUR-SUBDOMAIN.workers.dev</string>
+    <key>RUNWISE_SYNC_TOKEN</key>
+    <string>REPLACE_WITH_SYNC_SECRET</string>
+    <key>GARMIN_EMAIL</key>
+    <string>YOUR_GARMIN_EMAIL</string>
+    <key>GARMIN_PASSWORD</key>
+    <string>YOUR_GARMIN_PASSWORD</string>
+    <key>OURA_TOKEN</key>
+    <string>OPTIONAL_OURA_PAT</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/runwise-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/runwise-sync.err</string>
+</dict>
+</plist>
