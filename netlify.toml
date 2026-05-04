@@ -1,0 +1,3 @@
+[build]
+  command = "mkdir -p _site && cp index.html _site/"
+  publish = "_site"
