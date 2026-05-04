@@ -1151,42 +1151,69 @@ function renderRecap(snap) {
     document.getElementById('splits-viz').style.display = 'block';
   }
 
-  // coach analysis: compare to plan
+  // coach analysis: always run — compare to plan if same day, otherwise stand-alone read
   const plannedToday = findToday();
-  let analysis = '';
-  if (plannedToday && a.startTimeLocal?.startsWith(todayStr)) {
-    const plan = plannedToday.day.wo;
-    if (plan.type === 'long' && distKm < (plan.km * 0.85)) {
-      analysis += `Você fez <b>${distKm.toFixed(1)}km</b> de <b>${plan.km}km</b> planejados. `;
+  const sameDayPlan = (plannedToday && a.startTimeLocal?.startsWith(todayStr)) ? plannedToday.day.wo : null;
+  const bits = [];
+
+  // 1. Aderência ao plano (se a corrida foi no dia do plano)
+  if (sameDayPlan) {
+    if (sameDayPlan.type === 'long' && distKm < (sameDayPlan.km * 0.85)) {
+      bits.push(`Distância <b>${distKm.toFixed(1)}km</b> ficou abaixo dos <b>${sameDayPlan.km}km</b> planejados.`);
     }
-    // Did the workout include the prescribed MP block?
-    const hasMP = plan.steps?.some(s => s.pace === 'mp' || s.pace === 'hmp' || s.pace === 'tempo');
-    if (hasMP) {
+    const qStep = sameDayPlan.steps?.find(s => s.pace === 'mp' || s.pace === 'hmp' || s.pace === 'tempo');
+    if (qStep && splits.length) {
       const fastestSec = Math.min(...splits.map(s => s.dur / (s.dist / 1000)));
-      if (fastestSec > 290) { // slower than MP
-        analysis += `Splits ficaram em ritmo Z2/easy — o bloco de <b>${plan.steps.find(s=>s.pace==='mp')?.what || 'qualidade'}</b> não foi executado. `;
-      }
+      if (fastestSec > 290) bits.push(`Bloco de <b>${qStep.what}</b> não foi executado — splits ficaram em easy.`);
     }
-    // HR drift: last 3 vs first 3 splits
-    if (splits.length >= 6) {
-      const first = splits.slice(0, 3).map(s => s.hr).filter(Boolean);
-      const last = splits.slice(-3).map(s => s.hr).filter(Boolean);
-      if (first.length && last.length) {
-        const drift = (last.reduce((a,b)=>a+b,0)/last.length) - (first.reduce((a,b)=>a+b,0)/first.length);
-        if (drift > 6) analysis += `Deriva de FC <b>+${drift.toFixed(0)}bpm</b> entre os 3 primeiros e últimos km — esperado num progressivo, mas vale notar. `;
-      }
-    }
-    // Cadence
-    const cad = splits.map(s => s.cad).filter(Boolean);
-    if (cad.length) {
-      const avgCad = cad.reduce((a,b)=>a+b,0)/cad.length;
-      if (avgCad >= 180) analysis += `Cadência média <b>${avgCad.toFixed(0)}</b> spm — ótima eficiência neuromuscular. `;
-      else if (avgCad < 172) analysis += `Cadência média <b>${avgCad.toFixed(0)}</b> spm — abaixo do ideal (180+); foque em cadência alta nos próximos easy. `;
-    }
-  } else {
-    analysis = `Última corrida não é de hoje. Próximo treino prescrito: <b>${plannedToday?.day?.wo?.name || '—'}</b>.`;
   }
-  document.getElementById('recap-coach').innerHTML = analysis || 'Sessão executada como prescrita. ✓';
+
+  // 2. Distribuição de zona (FC ou pace)
+  const hrs = splits.map(s => s.hr).filter(Boolean);
+  if (hrs.length) {
+    const avgHR = hrs.reduce((a,b)=>a+b,0) / hrs.length;
+    let hrZone = 'recovery';
+    if (avgHR >= 145 && avgHR < 158) hrZone = 'easy (Z2)';
+    else if (avgHR >= 158 && avgHR < 167) hrZone = 'MP (Z3)';
+    else if (avgHR >= 167 && avgHR < 177) hrZone = 'tempo (Z4)';
+    else if (avgHR >= 177) hrZone = 'VO2 (Z5)';
+    bits.push(`FC média na zona <b>${hrZone}</b> · pace em <b>${paceZone}</b>.`);
+  } else {
+    bits.push(`Pace em <b>${paceZone}</b>.`);
+  }
+
+  // 3. Deriva de FC (1ª metade vs 2ª metade — sinal de fadiga aeróbica)
+  if (splits.length >= 6) {
+    const half = Math.floor(splits.length / 2);
+    const first = splits.slice(0, half).map(s => s.hr).filter(Boolean);
+    const last = splits.slice(-half).map(s => s.hr).filter(Boolean);
+    if (first.length && last.length) {
+      const drift = (last.reduce((a,b)=>a+b,0)/last.length) - (first.reduce((a,b)=>a+b,0)/first.length);
+      if (drift >= 8) bits.push(`Deriva de FC <b>+${drift.toFixed(0)}bpm</b> da 1ª pra 2ª metade — sinal de débito aeróbico. Forçou ou veio cansado.`);
+      else if (drift >= 4) bits.push(`Deriva de FC <b>+${drift.toFixed(0)}bpm</b> — normal pra esse volume.`);
+      else bits.push(`Deriva de FC controlada (<b>+${drift.toFixed(0)}bpm</b>) — fitness aeróbico bem expressado.`);
+    }
+  }
+
+  // 4. Consistência dos splits (CV do pace)
+  if (splits.length >= 5) {
+    const splitPaces = splits.map(s => s.dur / (s.dist / 1000));
+    const mean = splitPaces.reduce((a,b)=>a+b,0) / splitPaces.length;
+    const variance = splitPaces.reduce((s,p) => s + (p-mean)**2, 0) / splitPaces.length;
+    const cv = Math.sqrt(variance) / mean * 100;
+    if (cv < 2) bits.push(`Splits muito consistentes (variação ${cv.toFixed(1)}%) — execução cirúrgica.`);
+    else if (cv > 5) bits.push(`Splits irregulares (variação ${cv.toFixed(1)}%) — pacing pode melhorar.`);
+  }
+
+  // 5. Cadência
+  const cad = splits.map(s => s.cad).filter(Boolean);
+  if (cad.length) {
+    const avgCad = cad.reduce((a,b)=>a+b,0) / cad.length;
+    if (avgCad >= 180) bits.push(`Cadência <b>${avgCad.toFixed(0)} spm</b> — eficiente.`);
+    else if (avgCad < 172) bits.push(`Cadência <b>${avgCad.toFixed(0)} spm</b> abaixo de 180 — trabalhe nos easy.`);
+  }
+
+  document.getElementById('recap-coach').innerHTML = bits.join(' ') || 'Sessão registrada. Sem destaques nos dados.';
 }
 
 function drawSplits(splits) {
