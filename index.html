@@ -548,7 +548,7 @@
   <div style="font-size:13px; color:var(--ink-soft); line-height:1.6">
     <p style="margin-top:0"><b>Princípio guia:</b> 3 semanas é janela de afinamento, não de construção. Bosquet et al. (2007) — taper de 2-3 semanas com redução de volume 41-60%, intensidade preservada e frequência mantida = ganho de 0.5-3%.</p>
     <p><b>Especificidade (Daniels):</b> O sistema neuromuscular precisa "lembrar" o ritmo de prova. 6-8km cumulativos no HMP por semana até a S2.</p>
-    <p><b>Ajuste adaptativo:</b> Se readiness Oura &lt; 65 ou Garmin readiness &lt; 50 num dia de quality, swap automático com easy. Polish &gt; pancada.</p>
+    <p><b>Ajuste adaptativo:</b> Se readiness Oura &lt; 65 ou sono &lt; 60 num dia de quality, swap automático com easy. Polish &gt; pancada.</p>
     <p style="margin-bottom:0"><b>Não faz parte:</b> long &gt; 20km, progressivos longos, ladders agressivos. Você fez maratona há ~6 semanas — base já está. Adicionar agora = fadiga sem retorno.</p>
   </div>
 </details>
@@ -986,11 +986,11 @@ function renderHeroPredictions(garmin) {
 // ============================================================
 // SEMÁFORO + COACH BRIEFING
 // ============================================================
-function decideSemaforo({ ouraScore, ouraSleep, garminScore, plannedType }) {
-  // Scoring rubric:
-  //   green  if oura >= 75 AND sleep >= 75 AND garmin >= 50
-  //   amber  if any single signal < critical OR multiple amber
-  //   red    if oura < 65 OR sleep < 60 OR garmin < 30
+function decideSemaforo({ ouraScore, ouraSleep, plannedType }) {
+  // Scoring rubric (Oura only — Garmin readiness intentionally excluded):
+  //   green  if oura >= 75 AND sleep >= 75
+  //   amber  if any single signal in warn band
+  //   red    if oura < 65 OR sleep < 60
   // Quality days are stricter: amber on quality day = swap suggestion
   const reasons = [];
   let level = 'green';
@@ -1004,11 +1004,6 @@ function decideSemaforo({ ouraScore, ouraSleep, garminScore, plannedType }) {
     if (ouraSleep < 60) { level = 'red';   reasons.push({ k: 'Sono', v: ouraSleep, ok: 'bad', why: 'pobre' }); }
     else if (ouraSleep < 75) { if (level === 'green') level = 'amber'; reasons.push({ k: 'Sono', v: ouraSleep, ok: 'warn', why: 'curto' }); }
     else reasons.push({ k: 'Sono', v: ouraSleep, ok: 'ok', why: 'adequado' });
-  }
-  if (garminScore !== null) {
-    if (garminScore < 30) { level = 'red';   reasons.push({ k: 'Garmin', v: garminScore, ok: 'bad', why: 'low' }); }
-    else if (garminScore < 50) { if (level === 'green') level = 'amber'; reasons.push({ k: 'Garmin', v: garminScore, ok: 'warn', why: 'moderate' }); }
-    else reasons.push({ k: 'Garmin', v: garminScore, ok: 'ok', why: 'good' });
   }
 
   // Tighten for quality / long days
@@ -1042,20 +1037,15 @@ function renderSemaforoAndToday(snap) {
   const wo = t?.day?.wo;
   const planned = wo?.type || 'rest';
 
-  // --- pull signals
+  // --- pull signals (Oura only for trainability/recovery)
   const oR = snap.oura?.readiness || [];
   const oS = snap.oura?.sleep || [];
   const lastR = oR.length ? oR[oR.length - 1] : null;
   const lastS = oS.length ? oS[oS.length - 1] : null;
-  // Garmin readiness — pick AFTER_WAKEUP_RESET if present, else first
-  const trArr = snap.garmin?.training_readiness || [];
-  const wakeup = Array.isArray(trArr) ? trArr.find(r => r.context === 'AFTER_WAKEUP_RESET') : null;
-  const garmR = wakeup || (Array.isArray(trArr) ? trArr[0] : null);
 
   const sem = decideSemaforo({
     ouraScore: lastR?.score ?? null,
     ouraSleep: lastS?.score ?? null,
-    garminScore: garmR?.score ?? null,
     plannedType: planned,
   });
 
