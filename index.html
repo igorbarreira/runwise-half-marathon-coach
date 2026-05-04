@@ -205,6 +205,12 @@
     font-size: 13px; line-height: 1.55; color: var(--ink-soft); border-left: 3px solid var(--ink-soft);
   }
   .recap-coach b { color: var(--ink); }
+  .recap-coach p { margin: 0 0 8px 0; }
+  .recap-coach p:last-child { margin-bottom: 0; }
+  .recap-coach .ck {
+    display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin-bottom: 2px; font-weight: 700;
+  }
 
   /* ===== Week load strip ===== */
   .weekload {
@@ -1151,69 +1157,149 @@ function renderRecap(snap) {
     document.getElementById('splits-viz').style.display = 'block';
   }
 
-  // coach analysis: always run — compare to plan if same day, otherwise stand-alone read
+  // coach analysis: detect session structure (continuous vs interval) and report by section
   const plannedToday = findToday();
-  const sameDayPlan = (plannedToday && a.startTimeLocal?.startsWith(todayStr)) ? plannedToday.day.wo : null;
-  const bits = [];
+  const sameDay = a.startTimeLocal?.startsWith(todayStr);
+  const sameDayPlan = (plannedToday && sameDay) ? plannedToday.day.wo : null;
 
-  // 1. Aderência ao plano (se a corrida foi no dia do plano)
-  if (sameDayPlan) {
-    if (sameDayPlan.type === 'long' && distKm < (sameDayPlan.km * 0.85)) {
-      bits.push(`Distância <b>${distKm.toFixed(1)}km</b> ficou abaixo dos <b>${sameDayPlan.km}km</b> planejados.`);
+  const sections = analyzeRun(a, splits, sameDayPlan);
+  document.getElementById('recap-coach').innerHTML = sections.length
+    ? sections.map(s => `<p><span class="ck">${s.k}</span>${s.t}</p>`).join('')
+    : '<p>Sessão registrada. Sem destaques nos dados.</p>';
+}
+
+function avg(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : null; }
+
+function analyzeRun(a, splits, plan) {
+  const out = [];
+  const distKm = (a.distance || 0) / 1000;
+
+  // ---- Classify splits ----
+  // First, find where reps start (first stride/rep split, if any) so we can split
+  // aerobic block from cool-down: drift should be measured on the main block only.
+  const firstRepIdx = splits.findIndex(s =>
+    s.dist && s.dur && s.dist < 400 && (s.dur / (s.dist / 1000)) < 280
+  );
+  const reps = [], recoveries = [], aerobicMain = [], aerobicCool = [];
+  splits.forEach((s, i) => {
+    if (!s.dist || !s.dur) return;
+    const p = s.dur / (s.dist / 1000);
+    if (s.dist < 400) {
+      if (p < 280) reps.push(s);
+      else if (p > 320) recoveries.push(s);
+    } else if (s.dist >= 900) {
+      if (firstRepIdx === -1 || i < firstRepIdx) aerobicMain.push(s);
+      else aerobicCool.push(s);
     }
-    const qStep = sameDayPlan.steps?.find(s => s.pace === 'mp' || s.pace === 'hmp' || s.pace === 'tempo');
-    if (qStep && splits.length) {
+  });
+  const aerobic = aerobicMain.length ? aerobicMain : aerobicCool; // for headline metrics
+  const isInterval = reps.length >= 3;
+
+  // ---- 1. Veredito (aderência ao plano) ----
+  if (plan) {
+    const planRepStep = plan.steps?.find(st => /strides|×|\bx\s*\d/i.test(st.what || ''));
+    const planTempoStep = plan.steps?.find(st => st.pace === 'mp' || st.pace === 'hmp' || st.pace === 'tempo');
+    let v;
+    if (planRepStep && isInterval) {
+      v = `Sessão executada como prescrita: <b>${plan.name}</b>.`;
+    } else if (planRepStep && !isInterval) {
+      v = `Plano pedia <b>${planRepStep.what}</b> mas não detectei reps nos splits — strides ficaram de fora.`;
+    } else if (planTempoStep && splits.length) {
       const fastestSec = Math.min(...splits.map(s => s.dur / (s.dist / 1000)));
-      if (fastestSec > 290) bits.push(`Bloco de <b>${qStep.what}</b> não foi executado — splits ficaram em easy.`);
+      if (fastestSec > 290) v = `Plano pedia <b>${planTempoStep.what}</b> mas splits ficaram em easy — bloco de qualidade não saiu.`;
+      else v = `Sessão executada como prescrita: <b>${plan.name}</b>.`;
+    } else if (plan.type === 'long' && distKm < plan.km * 0.85) {
+      v = `Long encurtado: <b>${distKm.toFixed(1)}km</b> de <b>${plan.km}km</b> planejados.`;
+    } else {
+      v = `Sessão executada como prescrita: <b>${plan.name}</b>.`;
     }
+    if (plan.km > 0) v += ` Volume: <b>${distKm.toFixed(1)}km</b> de <b>${plan.km}km</b> previstos.`;
+    out.push({ k: 'Veredito', t: v });
   }
 
-  // 2. Distribuição de zona (FC ou pace)
-  const hrs = splits.map(s => s.hr).filter(Boolean);
-  if (hrs.length) {
-    const avgHR = hrs.reduce((a,b)=>a+b,0) / hrs.length;
-    let hrZone = 'recovery';
-    if (avgHR >= 145 && avgHR < 158) hrZone = 'easy (Z2)';
-    else if (avgHR >= 158 && avgHR < 167) hrZone = 'MP (Z3)';
-    else if (avgHR >= 167 && avgHR < 177) hrZone = 'tempo (Z4)';
-    else if (avgHR >= 177) hrZone = 'VO2 (Z5)';
-    bits.push(`FC média na zona <b>${hrZone}</b> · pace em <b>${paceZone}</b>.`);
-  } else {
-    bits.push(`Pace em <b>${paceZone}</b>.`);
-  }
-
-  // 3. Deriva de FC (1ª metade vs 2ª metade — sinal de fadiga aeróbica)
-  if (splits.length >= 6) {
-    const half = Math.floor(splits.length / 2);
-    const first = splits.slice(0, half).map(s => s.hr).filter(Boolean);
-    const last = splits.slice(-half).map(s => s.hr).filter(Boolean);
-    if (first.length && last.length) {
-      const drift = (last.reduce((a,b)=>a+b,0)/last.length) - (first.reduce((a,b)=>a+b,0)/first.length);
-      if (drift >= 8) bits.push(`Deriva de FC <b>+${drift.toFixed(0)}bpm</b> da 1ª pra 2ª metade — sinal de débito aeróbico. Forçou ou veio cansado.`);
-      else if (drift >= 4) bits.push(`Deriva de FC <b>+${drift.toFixed(0)}bpm</b> — normal pra esse volume.`);
-      else bits.push(`Deriva de FC controlada (<b>+${drift.toFixed(0)}bpm</b>) — fitness aeróbico bem expressado.`);
+  // ---- 2. Bloco aeróbico ----
+  if (aerobic.length >= 3) {
+    const ahrs = aerobic.map(s => s.hr).filter(Boolean);
+    const apaces = aerobic.map(s => s.dur / (s.dist / 1000));
+    const acads = aerobic.map(s => s.cad).filter(Boolean);
+    const avgApace = avg(apaces);
+    const avgAHR = avg(ahrs);
+    const avgACad = avg(acads);
+    let line = `<b>${aerobic.length}km</b> a <b>${fmtPace(avgApace)}/km</b>`;
+    if (avgAHR != null) {
+      line += `, FC <b>${avgAHR.toFixed(0)}bpm</b> (${Math.min(...ahrs)}–${Math.max(...ahrs)})`;
     }
+    if (avgACad != null) line += `, cadência <b>${avgACad.toFixed(0)} spm</b>`;
+    line += '.';
+    // drift: ignora primeiro km (warmup ramping cardio). Compara 1ª metade estável vs 2ª.
+    const stable = aerobic.slice(1);
+    if (stable.length >= 4) {
+      const half = Math.floor(stable.length / 2);
+      const f1 = stable.slice(0, half).map(s => s.hr).filter(Boolean);
+      const f2 = stable.slice(-half).map(s => s.hr).filter(Boolean);
+      if (f1.length && f2.length) {
+        const drift = avg(f2) - avg(f1);
+        if (drift >= 8) line += ` Deriva FC <b>+${drift.toFixed(0)}bpm</b> (após warmup) — débito aeróbico, forçou ou veio cansado.`;
+        else if (drift >= 4) line += ` Deriva FC <b>+${drift.toFixed(0)}bpm</b> — esperado pra esse volume.`;
+        else if (drift >= 0) line += ` Deriva FC <b>+${drift.toFixed(0)}bpm</b> — controlada, fitness bem expressado.`;
+        else line += ` Deriva FC <b>${drift.toFixed(0)}bpm</b> — FC caindo na 2ª metade, sinal de eficiência.`;
+      }
+    }
+    out.push({ k: 'Bloco aeróbico', t: line });
   }
 
-  // 4. Consistência dos splits (CV do pace)
-  if (splits.length >= 5) {
-    const splitPaces = splits.map(s => s.dur / (s.dist / 1000));
-    const mean = splitPaces.reduce((a,b)=>a+b,0) / splitPaces.length;
-    const variance = splitPaces.reduce((s,p) => s + (p-mean)**2, 0) / splitPaces.length;
-    const cv = Math.sqrt(variance) / mean * 100;
-    if (cv < 2) bits.push(`Splits muito consistentes (variação ${cv.toFixed(1)}%) — execução cirúrgica.`);
-    else if (cv > 5) bits.push(`Splits irregulares (variação ${cv.toFixed(1)}%) — pacing pode melhorar.`);
+  // ---- 3. Strides / reps ----
+  if (isInterval) {
+    const repPaces = reps.map(s => s.dur / (s.dist / 1000));
+    const repHRs = reps.map(s => s.hr).filter(Boolean);
+    const repCads = reps.map(s => s.cad).filter(Boolean);
+    const repDists = reps.map(s => s.dist);
+    const avgDist = avg(repDists);
+    const avgPace = avg(repPaces);
+    let line = `<b>${reps.length}× ${avgDist.toFixed(0)}m</b> a <b>${fmtPace(avgPace)}/km</b>`;
+    if (repHRs.length) line += `, pico FC <b>${Math.max(...repHRs)}bpm</b>`;
+    if (repCads.length) line += `, cadência <b>${avg(repCads).toFixed(0)} spm</b>`;
+    line += '.';
+    if (recoveries.length >= 2) {
+      const avgRecDur = avg(recoveries.map(s => s.dur));
+      line += ` Recuperações ~<b>${avgRecDur.toFixed(0)}s</b> entre reps.`;
+    }
+    // qualidade neuromuscular
+    if (repCads.length && avg(repCads) >= 188) line += ` Cadência alta nos reps — qualidade neuromuscular boa.`;
+    out.push({ k: 'Strides / reps', t: line });
   }
 
-  // 5. Cadência
-  const cad = splits.map(s => s.cad).filter(Boolean);
-  if (cad.length) {
-    const avgCad = cad.reduce((a,b)=>a+b,0) / cad.length;
-    if (avgCad >= 180) bits.push(`Cadência <b>${avgCad.toFixed(0)} spm</b> — eficiente.`);
-    else if (avgCad < 172) bits.push(`Cadência <b>${avgCad.toFixed(0)} spm</b> abaixo de 180 — trabalhe nos easy.`);
+  // ---- 4. Forma (cadência + consistência) — só pra sessões contínuas (interval já cobre nos blocos) ----
+  if (!isInterval && splits.length >= 5) {
+    const cads = splits.map(s => s.cad).filter(Boolean);
+    const paces = splits.map(s => s.dur / (s.dist / 1000));
+    const meanP = avg(paces);
+    const cv = Math.sqrt(paces.reduce((s,p) => s + (p-meanP)**2, 0) / paces.length) / meanP * 100;
+    let line = '';
+    if (cads.length) {
+      const c = avg(cads);
+      line += `Cadência <b>${c.toFixed(0)} spm</b>`;
+      if (c >= 180) line += ' (eficiente)';
+      else if (c < 172) line += ' (abaixo de 180 — trabalhe nos easy)';
+      line += '.';
+    }
+    if (cv < 2) line += ` Splits muito consistentes (CV ${cv.toFixed(1)}%).`;
+    else if (cv > 5) line += ` Splits irregulares (CV ${cv.toFixed(1)}%) — pacing pode melhorar.`;
+    if (line) out.push({ k: 'Forma', t: line.trim() });
   }
 
-  document.getElementById('recap-coach').innerHTML = bits.join(' ') || 'Sessão registrada. Sem destaques nos dados.';
+  // ---- 5. Training Effect (Garmin) ----
+  if (a.aerobicTrainingEffect != null && a.aerobicTrainingEffect > 0) {
+    const ae = a.aerobicTrainingEffect;
+    const an = a.anaerobicTrainingEffect || 0;
+    let line = `Aeróbico <b>${ae.toFixed(1)}/5</b>`;
+    if (an >= 0.5) line += ` · anaeróbico <b>${an.toFixed(1)}/5</b>`;
+    if (a.trainingEffectLabel) line += ` · classificação Garmin: <b>${a.trainingEffectLabel}</b>`;
+    line += '.';
+    out.push({ k: 'Training effect', t: line });
+  }
+
+  return out;
 }
 
 function drawSplits(splits) {
