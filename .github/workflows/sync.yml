@@ -1,9 +1,9 @@
 name: RunWise sync
 
 on:
-  schedule:
-    # Every 2 hours, all day. UTC. (BRT = UTC-3)
-    - cron: "0 */2 * * *"
+  # Schedule disabled — sync now runs locally on Mac via launchd
+  # (com.runwise.sync, hourly). GH Actions IPs were rate-limited by Garmin.
+  # Kept workflow_dispatch as a manual fallback if Mac is offline.
   workflow_dispatch:
 
 concurrency:
