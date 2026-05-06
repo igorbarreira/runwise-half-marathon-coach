@@ -314,6 +314,40 @@
   .modal h3 { font-size: 20px; font-weight: 700; }
   .modal .close { float: right; background: var(--bg-soft); border: 0; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 16px; }
 
+  /* ===== Buttons ===== */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 12px 16px; border-radius: 12px; border: 0; cursor: pointer;
+    font: inherit; font-weight: 600; font-size: 14px;
+    background: var(--ink); color: white;
+    transition: opacity .12s, transform .12s, background .12s;
+  }
+  .btn:hover { opacity: .92; }
+  .btn:active { transform: translateY(1px); }
+  .btn-outline {
+    background: transparent; color: var(--ink);
+    border: 1px solid var(--ink);
+  }
+  .btn-outline:hover { background: var(--bg-soft); }
+
+  /* ===== Pill MOVIDO + dia movido ===== */
+  .pill-moved { background: #FEF3C7; color: #92400E; }
+  .day.moved { border-color: #FCD34D; box-shadow: 0 0 0 3px #FEF3C7; }
+
+  /* ===== Toast ===== */
+  .toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    background: var(--ink); color: white; padding: 12px 18px; border-radius: 12px;
+    font-size: 13px; font-weight: 600;
+    z-index: 60; opacity: 0; pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+    box-shadow: var(--shadow-lg);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+  .toast.ok { background: var(--green); }
+  .toast.err { background: var(--red); }
+
   /* ===== Footer ===== */
   footer { margin-top: 28px; color: var(--muted); font-size: 11px; text-align: center; }
   footer .v { font-weight: 600; color: var(--ink-soft); }
@@ -584,6 +618,9 @@
     <div id="modal-content"></div>
   </div>
 </div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
 
 <footer>
   RunWise v2.0 · <span class="v" id="api-mode">—</span> · Última sync <span class="v" id="last-sync">—</span>
@@ -890,9 +927,47 @@ function dayBadgePill(type) {
   })[type] || '';
 }
 
+// ============================================================
+// MOVES (mover treinos para outro dia)
+// ============================================================
+const MOVES = {
+  get() {
+    try { return JSON.parse(localStorage.getItem('rw_moves') || '{}'); }
+    catch (_) { return {}; }
+  },
+  set(origDate, newDate) {
+    const m = MOVES.get();
+    if (!newDate || newDate === origDate) delete m[origDate];
+    else m[origDate] = newDate;
+    localStorage.setItem('rw_moves', JSON.stringify(m));
+  },
+  clearAll() { localStorage.removeItem('rw_moves'); },
+};
+function effectiveDate(origDate) {
+  return MOVES.get()[origDate] || origDate;
+}
+function isMoved(origDate) {
+  const m = MOVES.get();
+  return !!(m[origDate] && m[origDate] !== origDate);
+}
+
+function showToast(msg, kind) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.className = 'toast ' + (kind || '') + ' show';
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.className = 'toast ' + (kind || ''), 2400);
+}
+
 function findToday() {
-  for (const wk of PLAN) for (const d of wk.days) if (d.date === todayStr) return { week: wk, day: d };
-  return null;
+  // Considera moves: prefere workout cuja data efetiva seja hoje
+  const matches = [];
+  for (const wk of PLAN) for (const d of wk.days) {
+    if (effectiveDate(d.date) === todayStr) matches.push({ week: wk, day: d });
+  }
+  if (!matches.length) return null;
+  return matches.find(m => m.day.wo.type !== 'rest') || matches[0];
 }
 
 // Estimate pace zone from pace seconds/km (matched to PACES table)
@@ -1429,17 +1504,29 @@ function renderPlan(snap) {
       <div class="days" id="days-${wi}"></div>`;
     root.appendChild(wDiv);
     const daysEl = wDiv.querySelector(`#days-${wi}`);
-    week.days.forEach((d) => {
-      const isToday = d.date === todayStr;
+    // Ordena dias da semana por data efetiva (move visualmente um treino movido)
+    const sortedDays = [...week.days].sort((a, b) =>
+      effectiveDate(a.date).localeCompare(effectiveDate(b.date))
+    );
+    sortedDays.forEach((d) => {
+      const eff = effectiveDate(d.date);
+      const moved = isMoved(d.date);
+      const isToday = eff === todayStr;
       const isRace = d.wo.type === 'race';
-      const isDone = datesDone.has(d.date) && d.date < todayStr && d.wo.type !== 'rest';
+      const isDone = (datesDone.has(eff) || datesDone.has(d.date)) && eff < todayStr && d.wo.type !== 'rest';
+      const effD = new Date(eff + 'T07:00:00');
+      const dowEff = ['dom','seg','ter','qua','qui','sex','sáb'][effD.getDay()];
       const dEl = document.createElement('div');
-      dEl.className = 'day' + (isToday ? ' today' : '') + (isRace ? ' race' : '') + (isDone ? ' done' : '');
+      dEl.className = 'day'
+        + (isToday ? ' today' : '')
+        + (isRace ? ' race' : '')
+        + (isDone ? ' done' : '')
+        + (moved ? ' moved' : '');
       dEl.innerHTML = `
-        <div class="date">${d.dow.toUpperCase()} · ${fmtDate(d.date)}</div>
-        <div class="pillrow">${dayBadgePill(d.wo.type)}${isDone ? '<span class="check">✓</span>' : ''}</div>
+        <div class="date">${dowEff.toUpperCase()} · ${fmtDate(eff)}</div>
+        <div class="pillrow">${dayBadgePill(d.wo.type)}${isDone ? '<span class="check">✓</span>' : ''}${moved ? '<span class="pill pill-moved">↻ MOVIDO</span>' : ''}</div>
         <div class="label">${d.wo.name}</div>
-        <div class="small">${d.wo.km > 0 ? d.wo.km + ' km' : '—'}</div>
+        <div class="small">${d.wo.km > 0 ? d.wo.km + ' km' : '—'}${moved ? ` · de ${fmtDate(d.date)}` : ''}</div>
       `;
       dEl.addEventListener('click', () => openModal(week, d));
       daysEl.appendChild(dEl);
@@ -1450,8 +1537,18 @@ function renderPlan(snap) {
 // ============================================================
 // MODAL
 // ============================================================
+// Janela permitida para mover treinos (dentro do plano)
+const PLAN_MIN_DATE = PLAN[0].days[0].date;
+const PLAN_MAX_DATE = PLAN[PLAN.length - 1].days[PLAN[PLAN.length - 1].days.length - 1].date;
+
 function openModal(week, day) {
   const wo = day.wo;
+  const origDate = day.date;
+  const eff = effectiveDate(origDate);
+  const moved = isMoved(origDate);
+  const effD = new Date(eff + 'T07:00:00');
+  const dowEff = ['DOM','SEG','TER','QUA','QUI','SEX','SÁB'][effD.getDay()];
+
   const stepsHtml = wo.steps?.length
     ? `<div class="steps">` + wo.steps.map(s => `
         <div class="step">
@@ -1463,12 +1560,36 @@ function openModal(week, day) {
           </div>
         </div>`).join('') + `</div>`
     : '';
+
+  const movedBadge = moved
+    ? `<div style="background:#FEF3C7;color:#92400E;padding:8px 12px;border-radius:10px;font-size:12px;margin-top:10px;font-weight:600">↻ Movido de ${fmtDate(origDate)} → ${fmtDate(eff)}</div>`
+    : '';
+
+  const moveControls = (wo.type !== 'rest' && wo.type !== 'race')
+    ? `
+      <div style="display:grid;gap:8px;margin-top:18px">
+        <button class="btn btn-outline" onclick="toggleMovePicker()">↻ Mover treino para outro dia</button>
+        ${moved ? `<button class="btn btn-outline" style="color:var(--muted);border-color:var(--line)" onclick="undoMove('${origDate}')">Desfazer mudança</button>` : ''}
+      </div>
+      <div id="move-picker" style="display:none;margin-top:14px;padding:14px;background:var(--bg);border-radius:12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Nova data:</div>
+        <input type="date" id="move-date-input" value="${eff}" min="${PLAN_MIN_DATE}" max="${PLAN_MAX_DATE}"
+               style="width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:16px;font-family:inherit;background:white">
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4">A mudança fica salva localmente neste dispositivo.</div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn" onclick="confirmMove('${origDate}')" style="flex:1">Confirmar</button>
+          <button class="btn btn-outline" onclick="toggleMovePicker()">Cancelar</button>
+        </div>
+      </div>`
+    : '';
+
   document.getElementById('modal-content').innerHTML = `
     <div style="font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)">
-      ${day.dow.toUpperCase()} · ${fmtDate(day.date)} · ${week.label}
+      ${dowEff} · ${fmtDate(eff)} · ${week.label}
     </div>
     <h3 style="margin-top:6px">${wo.name}</h3>
     <div style="color:var(--muted);font-size:13px;margin-top:2px">${wo.focus || ''}</div>
+    ${movedBadge}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
       <div style="background:var(--bg);border-radius:12px;padding:12px">
         <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">Distância</div>
@@ -1481,6 +1602,7 @@ function openModal(week, day) {
     </div>
     ${stepsHtml}
     <p style="margin-top:14px;color:var(--ink-soft);line-height:1.55;font-size:14px">${wo.desc || ''}</p>
+    ${moveControls}
     <button class="close" onclick="closeModal()" style="float:none;width:auto;border-radius:10px;padding:10px 14px;margin-top:14px;background:var(--bg-soft)">Fechar</button>
   `;
   document.getElementById('modal').classList.add('open');
@@ -1488,12 +1610,57 @@ function openModal(week, day) {
 function closeModal() { document.getElementById('modal').classList.remove('open'); }
 document.getElementById('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
 
+function toggleMovePicker() {
+  const p = document.getElementById('move-picker');
+  if (!p) return;
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function rerenderAfterMove() {
+  if (window.__snap) {
+    renderSemaforoAndToday(window.__snap);
+    renderWeekLoad(window.__snap);
+    renderPlan(window.__snap);
+  } else {
+    renderPlan({ garmin: { activities: [] } });
+  }
+}
+
+function confirmMove(origDate) {
+  const input = document.getElementById('move-date-input');
+  if (!input) return;
+  const newDate = input.value;
+  if (!newDate) return;
+  if (newDate < PLAN_MIN_DATE || newDate > PLAN_MAX_DATE) {
+    showToast('Data fora da janela do plano', 'err');
+    return;
+  }
+  if (newDate === origDate) {
+    MOVES.set(origDate, null);
+    showToast('Mudança removida', 'ok');
+  } else {
+    MOVES.set(origDate, newDate);
+    const d = new Date(newDate + 'T07:00:00');
+    showToast(`Movido para ${fmtDate(newDate)}`, 'ok');
+  }
+  closeModal();
+  rerenderAfterMove();
+}
+
+function undoMove(origDate) {
+  MOVES.set(origDate, null);
+  showToast('Mudança desfeita', 'ok');
+  closeModal();
+  rerenderAfterMove();
+}
+
 // ============================================================
 // INIT
 // ============================================================
 renderCountdown();
 (async () => {
   const snap = await loadSnapshot();
+  window.__snap = snap;
   renderHeroPredictions(snap.garmin);
   renderSemaforoAndToday(snap);
   renderRecap(snap);
